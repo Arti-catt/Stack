@@ -6,171 +6,283 @@ typedef double StackElem_t;
 
 //#define STACK_DEBUG       //TURN DEBUG ON/OFF
 
+//DEBUG macro system
 #ifdef STACK_DEBUG
-#define DEBUG_STACK_DUMP(parametres) StackDump(parametres);
-#define DEBUG_PRINT(...) fprintf(stderr, __VA_ARGS__);
+    #define DEBUG(...) __VA_ARGS__
+    #define DEBUG_STACK_DUMP(parametres) StackDump(parametres);
+    #define DEBUG_PRINT(...) fprintf(log_file, __VA_ARGS__);
+    #define DEBUG_ARGS , __FILE__, __LINE__, __FUNCTION__
+    #define DEBUG_PAR , const char *file, int line, const char *function
+    #define STACK_VERIFY_ARGS file, line, __FUNCTION__
+
+    #define LOGFILE "DEBUGlog.txt"
+    FILE *log_file = NULL;
 #else
-#define ON_DEBUG(...)
-#define DEBUG_STACK_DUMP(...)
-#define DEBUG_PRINT(...)
+    #define DEBUG(...)
+    #define DEBUG_STACK_DUMP(...)
+    #define DEBUG_PRINT(...)
+    #define DEBUG_ARGS
+    #define DEBUG_PAR
+    #define STACK_VERIFY_ARGS __FILE__, __LINE__, __FUNCTION__
 #endif
-
-#define OTL_PAR __FILE__, __LINE__, __FUNCTION__
-#define GONDON(condition, text) if (!(condition)) {     \
-                                    fprintf(stderr, "File: %s:%d, Function: %s. %s\n",   \
-                                        OTL_PAR, text);   \
-                                    exit(true);    \
-                                }
-#define PRINTERR(text) fprintf(stderr, "File: %s:%d, Function: %s\n%s\n",     \
-                            file, line, function, text);
-
-#define STACK_OK Stack_ok(stk, OTL_PAR);
+//Function macro-names for connecting with DEBUG system
+#define StackInit(stk, capacity) _StackInit_(stk, capacity DEBUG_ARGS)
+#define StackPush(stk, elem) _StackPush_(stk, elem DEBUG_ARGS)
+#define StackPop(stk) _StackPop_(stk DEBUG_ARGS)
+#define StackDestroy(stk) _StackDestroy_(stk DEBUG_ARGS)
+#define StackPrint(stk) _StackPrint_(stk DEBUG_ARGS)
+//PRINTERR made for NON_FATAL errors
+#define PRINTERR(text) fprintf(stderr, "%s\n", text);   \
+                        DEBUG_PRINT("%s\n", text);
+//GONDON_STK can be used in function with poiner on struct <stk> ONLY
+#define GONDON_STK(condition, text)     \
+    if (!(condition)) {     \
+        fprintf(stderr, "File: %s:%d, Function: %s\n%s\n",   \
+            STACK_VERIFY_ARGS, text);   \
+        DEBUG_PRINT(">>GONDON_STK<< File: %s:%d, Function: %s\n%s\n",   \
+            STACK_VERIFY_ARGS, text);      \
+        DEBUG_STACK_DUMP(stk)   \
+        exit(true);    \
+    }
+//macro STACK_OK check ФАТАЛЬНОСТЬ error-a got from function Stack_Verify
+#define STACK_OK GONDON_STK(Stack_Verify(stk, STACK_VERIFY_ARGS) != FATAL_ERR,   \
+                                "ERROR: STRUCT <Stack_t> HAVE A PROBLEM, HOUSTON")
 
 #define VOID -777
+#define CANARY 0xD0BB1
+#define STK_CANARY 0xEB1D0EB1
 
 enum ErrorCodes {
-    FUNC_FAILED  = -1,
-    FUNC_IS_OK   =  0,
+    ERRNO          =  0,
+    NON_FATAL_ERR  =  1,
+    FATAL_ERR      =  2,
+};
+
+enum ReallocMods {
+    DOWN  =  0,
+    UP    =  1,
 };
 
 struct Stack_t {
+    StackElem_t canary_t1 = CANARY;
+    StackElem_t *real_stack;
 	StackElem_t *stack;
     ssize_t size;
     ssize_t capacity;
+    StackElem_t canary_t2 = CANARY;
 };
 
-void StackInit(Stack_t *stk, ssize_t capacity);
-void StackPush(Stack_t *stk, StackElem_t elem);
-StackElem_t StackPop(Stack_t *stk);    //мб функция проверки пустоты стека...
-int StackDestroy(Stack_t *stk);
+void _StackInit_(Stack_t *stk, ssize_t capacity DEBUG_PAR);
+void _StackPush_(Stack_t *stk, StackElem_t elem DEBUG_PAR);
+StackElem_t _StackPop_(Stack_t *stk DEBUG_PAR);
+StackElem_t *ReSize(Stack_t *stk, int mod);
+
+void _StackDestroy_(Stack_t *stk DEBUG_PAR);
+
+void _StackPrint_(Stack_t *stk DEBUG_PAR);
 
 void StackDump(Stack_t *stk);
-void PrintStack(Stack_t *stk);
-
-void Stack_ok(Stack_t *stk,
+uint Stack_Verify(Stack_t *stk,
             const char *file, int line, const char *function);
 
 int main()
 {
     Stack_t stk1 = {};
-
-    StackInit(&stk1, 15);
-    for (int i = 0 ; i < 2; i++)
+    StackInit(&stk1, 50);
+    //char *pushka = (char *) &stk1;
+    //for (int i = 0; i < 8; i++) {
+    //    *pushka = 'h';
+    //    pushka++;
+    //}
+    for (int i = 0; i < 10; i++)
         StackPush(&stk1, -1);
-    StackPop(&stk1);
-
-    PrintStack(&stk1);
+    StackPrint(&stk1);
     StackDestroy(&stk1);
     return 0;
 }
 
-void Stack_ok(Stack_t *stk,
+uint Stack_Verify(Stack_t *stk,
             const char *file, int line, const char *function)
 {
-    bool stack_not_OK = false;
+    DEBUG_PRINT("Stack_Verify protocol:\n"
+                "File: %s:%d, Function: %s\n", file, line, function);
 
-    if (stk->stack == NULL) {
-        PRINTERR("ERROR: pointer on stack in struct <Stack_t> is NULL")
-        stack_not_OK = true;
+    int err = ERRNO;
+    if (stk == NULL) {
+        PRINTERR("WARNING_FATAL: pointer on struct <Stack_t> is NULL")
+        return FATAL_ERR;
+    }
+    if (stk->canary_t1 != CANARY) {
+        PRINTERR("WARNING_FATAL: LEFT canary have CHANGED")
+        err = FATAL_ERR;
+    }
+    if (stk->canary_t2 != CANARY) {
+        PRINTERR("WARNING_FATAL: RIGHT canary have CHANGED")
+        err = FATAL_ERR;
     }
     if (stk->size < 0) {
-        PRINTERR("ERROR: size < 0 in struct <Stack_t>")
-        stack_not_OK = true;
+        PRINTERR("WARNING_FATAL: size < 0 in struct <Stack_t>")
+        err = FATAL_ERR;
     }
     if (stk->capacity < 0) {
-        PRINTERR("ERROR: capacity < 0 in struct <Stack_t>")
-        stack_not_OK = true;
+        PRINTERR("WARNING_FATAL: capacity < 0 in struct <Stack_t>")
+        err = FATAL_ERR;
     }
     if (stk->size > stk->capacity) {
-        PRINTERR("ERROR: size > capacity in struct <Stack_t>")
-        stack_not_OK = true;
+        PRINTERR("WARNING_FATAL: size > capacity in struct <Stack_t>")
+        err = FATAL_ERR;
     }
-    if (stack_not_OK) {
-        DEBUG_PRINT("\n------DEBUG PRINT------\n\n")
-        DEBUG_STACK_DUMP(stk)
-        exit(true);
+    if (stk->real_stack == NULL) {
+        PRINTERR("WARNING_FATAL: pointer on real_stack in struct <Stack_t> is NULL")
+        return FATAL_ERR;
     }
+    if (stk->stack == NULL) {
+        PRINTERR("WARNING_FATAL: pointer on stack in struct <Stack_t> is NULL")
+        return FATAL_ERR;
+    }
+    if (stk->real_stack[0] != (StackElem_t) STK_CANARY) {
+        PRINTERR("WARNING: LEFT stack canary have changed")
+        (err == FATAL_ERR) ? : err = NON_FATAL_ERR;
+    }
+    if (stk->real_stack[stk->capacity + 1] != (StackElem_t) STK_CANARY) {
+        PRINTERR("WARNING: RIGHT stack canary have changed")
+        (err == FATAL_ERR) ? : err = NON_FATAL_ERR;
+    }
+
+    DEBUG(switch (err) {
+        case ERRNO:
+            DEBUG_PRINT("Stack_Verify didn't detect errors\n");
+            break;
+        case NON_FATAL_ERR:
+            DEBUG_PRINT("Stack_Verify DETECTED NON_FATAL_ERRORS\n");
+            break;
+        default:
+            DEBUG_PRINT("Stack_Verify DETECTED FATAL_ERRORS\n");
+            break;
+    })
+    DEBUG_PRINT("Stack_Verify completed.\n\n");
+    return err;
 }
 
-void StackInit(Stack_t *stk, ssize_t capacity)
+void _StackInit_(Stack_t *stk, ssize_t capacity DEBUG_PAR)
 {
-    GONDON(stk, "Struct <Stack_t> ISN'T CREATED")
-    StackElem_t *array = (StackElem_t *) calloc(capacity, sizeof(StackElem_t));
-
-    stk->stack = array;
+    GONDON_STK(stk, "WARNING_FATAL: Struct <Stack_t> isn't created");
+    StackElem_t *array = (StackElem_t *) calloc(capacity + 2, sizeof(StackElem_t));
+    array[0] = (StackElem_t) STK_CANARY;
+    array[capacity + 1] = (StackElem_t) STK_CANARY;
+    stk->stack = array + 1;
+    stk->real_stack = array;
     stk->capacity = capacity;
     stk->size = 0;
 
+    DEBUG(log_file = fopen(LOGFILE, "w");)
     STACK_OK
 }
 
-void StackPush(Stack_t *stk, StackElem_t elem)
+void _StackPush_(Stack_t *stk, StackElem_t elem DEBUG_PAR)
 {
     STACK_OK
+
     if (stk->size < stk->capacity) {
         stk->stack[stk->size++] = elem;
-        STACK_OK
         return;
     }
+    stk->stack = ReSize(stk, UP);
 
-    stk->capacity *= 2;
-    StackElem_t * pre_stack = NULL;
-    GONDON(pre_stack = (StackElem_t *) realloc(stk->stack, stk->capacity * sizeof(StackElem_t)), "You have a (nil) pointer here, stupid boy");
-    stk->stack = pre_stack;
-
-    GONDON(stk->size < stk->capacity, "Size >= capacity after <realloc>. Eto fiasko, bratan")
+    GONDON_STK(stk->size < stk->capacity, "Size >= capacity after <realloc>. Eto fiasko, bratan")
     stk->stack[stk->size++] = elem;
 
     STACK_OK
 }
 
-StackElem_t StackPop(Stack_t *stk)
+StackElem_t *ReSize(Stack_t *stk, int mod)
+{
+    switch(mod) {
+        case UP:
+            stk->capacity <<= 1;    //De facto *2
+            break;
+        case DOWN:
+            stk->capacity >>= 1;    //De facto /2
+            break;
+    }
+    StackElem_t *pre_stack = NULL;
+    assert(pre_stack = (StackElem_t *) realloc(stk->real_stack, (stk->capacity + 2) * sizeof(StackElem_t)));
+    stk->real_stack[stk->capacity + 1] = (StackElem_t) STK_CANARY;
+
+    return pre_stack + 1;
+}
+
+StackElem_t _StackPop_(Stack_t *stk DEBUG_PAR)
 {
     STACK_OK
-    GONDON(stk->size > 0, "Can't pop because you are pidr")
 
+    GONDON_STK(stk->size > 0, "WARNING_FATAL: Stack haven't elements for StackPop")
     StackElem_t sin_popa = stk->stack[--stk->size];
     stk->stack[stk->size] = VOID;
 
+    if ((stk->capacity >> 2) > stk->size) {
+        stk->stack = ReSize(stk, DOWN);
+    }
+    
     STACK_OK
     return sin_popa;
 }
 
-int StackDestroy(Stack_t *stk)
+void _StackDestroy_(Stack_t *stk DEBUG_PAR)
 {
     STACK_OK
 
     for (ssize_t i = 0; i < stk->size; i++)
         stk->stack[i] = VOID;
-    free(stk->stack);
+    free(stk->real_stack);
     *stk = {};
 
-    return FUNC_IS_OK;
+    DEBUG(fclose(log_file);)
 }
 
 void StackDump(Stack_t *stk)
 {
-    GONDON(stk, "I can't print, pon?")
-    fprintf(stderr, "Struct Stack_t[%p] {\n", stk->stack);
-    fprintf(stderr, "Capacity = %zu, size = %zu\n}\n", stk->capacity, stk->size);
-    if (stk->size <= 0)
-        fprintf(stderr, "STACK HAVE NO MORE 0 ELEMENTS\n");
-
-    fprintf(stderr, "Print Stack:\n~~~~~~~~~~~~~~~~~~~~\n");
-    for (ssize_t i = 0; i < stk->capacity; i++) {
-        if (i < stk->size)
-            fprintf(stderr, " * [%zd]\t%lg\n", i, stk->stack[i]);
-        else
-            fprintf(stderr, "   [%zd]\t%d\n", i, VOID);
+    DEBUG_PRINT("~~~~~~~~~~~~~~~~~~~~DEBUG~~~~~~~~~~~~~~~~~~~~\n");
+    if (stk == NULL) {
+        DEBUG_PRINT("Pointer on struct <Stack_t> is NULL\n"
+                    "Have not object for print\n"
+                    "~~~~~~~~~~~~~~~~~~~~~END~~~~~~~~~~~~~~~~~~~~~\n");
+        return;
     }
-    fprintf(stderr, "~~~~~~~~~~~~~~~~~~~~\nEnd of print.\n");
+
+    DEBUG_PRINT("Struct Stack_t<%p> {\n", stk->stack);
+    DEBUG_PRINT("Canary_t1 = %lg;\n"
+                "Stack<%p>;\n"
+                "capacity = %zu;\n"
+                "size = %zu;\n"
+                "Canary_t2 = %lg;\n"
+                "}\n",
+                stk->canary_t1, stk->stack, stk->capacity, stk->size, stk->canary_t2);
+    if (stk->size <= 0)
+        DEBUG_PRINT("STACK HAVE NO MORE 0 ELEMENTS\n");
+
+    DEBUG_PRINT("Print Stack:\n--------------------\n");
+    DEBUG_PRINT("*LEFT STK_CANARY* = %lg\n", stk->real_stack[0]);
+    for (ssize_t i = 0; i < stk->capacity; i++) {
+        if (i < stk->size) {
+            DEBUG_PRINT(" * [%zd]\t%lg\n", i, stk->stack[i]);
+        }
+        else {
+            DEBUG_PRINT("   [%zd]\t%d\n", i, VOID);
+        }
+    }
+    DEBUG_PRINT("*RIGHT STK_CANARY* = %lg\n", stk->real_stack[stk->capacity + 1]);
+    DEBUG_PRINT("--------------------\nEnd of print.\n");
+    DEBUG_PRINT("~~~~~~~~~~~~~~~~~~~~~END~~~~~~~~~~~~~~~~~~~~~\n");
 }
 
-void PrintStack(Stack_t *stk)
+void _StackPrint_(Stack_t *stk DEBUG_PAR)
 {
     STACK_OK
 
     for (ssize_t i = 0; i < stk->size; i++)
-        printf("%lg\t", stk->stack[i]);
-    printf("\n");
+        printf("%lg  ", stk->stack[i]);
+    if (stk->size > 0)
+        printf("\n");
 }
+//TODO: hash
